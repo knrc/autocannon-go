@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"math"
@@ -30,6 +31,8 @@ func main() {
 	runtime := flag.Int("duration", 10, "The number of seconds to run the autocannnon.")
 	timeout := flag.Int("timeout", 10, "The number of seconds before timing out on a request.")
 	debug := flag.Bool("debug", false, "A utility debug flag.")
+	insecure := flag.Bool("insecure", false, "Trust all certificates.")
+	caCert := flag.String("caCert", "", "The CA certificate for verifying certificates.")
 	flag.Parse()
 
 	if *uri == "" {
@@ -42,7 +45,7 @@ func main() {
 
 	proc := goprocess.Background()
 
-	respChan, errChan := runClients(proc, *clients, *pipeliningFactor, time.Second*time.Duration(*timeout), *uri)
+	respChan, errChan := runClients(proc, *clients, *pipeliningFactor, time.Second*time.Duration(*timeout), *uri, *insecure, *caCert)
 
 	latencies := hdrhistogram.New(1, 10000, 5)
 	requests := hdrhistogram.New(1, 1000000, 5)
@@ -200,7 +203,7 @@ func formatBigNum(i float64) string {
 	return fmt.Sprintf("%.0fk", math.Round(i/1000))
 }
 
-func runClients(ctx goprocess.Process, clients int, pipeliningFactor int, timeout time.Duration, uri string) (<-chan *resp, <-chan error) {
+func runClients(ctx goprocess.Process, clients int, pipeliningFactor int, timeout time.Duration, uri string, insecure bool, caCert string) (<-chan *resp, <-chan error) {
 	respChan := make(chan *resp, 2*clients*pipeliningFactor)
 	errChan := make(chan error, 2*clients*pipeliningFactor)
 	u, _ := url.Parse(uri)
@@ -210,6 +213,9 @@ func runClients(ctx goprocess.Process, clients int, pipeliningFactor int, timeou
 			Addr:               fmt.Sprintf("%v:%v", u.Hostname(), u.Port()),
 			IsTLS:              u.Scheme == "https",
 			MaxPendingRequests: pipeliningFactor,
+			TLSConfig: &tls.Config{
+				InsecureSkipVerify: insecure,
+			},
 		}
 
 		for j := 0; j < pipeliningFactor; j++ {
